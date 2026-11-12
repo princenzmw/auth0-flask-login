@@ -7,12 +7,27 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-app = Flask(__name__)
-app.secret_key = os.getenv("SECRET_KEY", "change-me-in-production")
 
-AUTH0_DOMAIN = os.getenv("AUTH0_DOMAIN")
-AUTH0_CLIENT_ID = os.getenv("AUTH0_CLIENT_ID")
-AUTH0_CLIENT_SECRET = os.getenv("AUTH0_CLIENT_SECRET")
+def _require_env(name: str) -> str:
+    value = os.getenv(name)
+    if not value:
+        raise RuntimeError(
+            f"Missing required environment variable: {name}. "
+            "Copy .env.example to .env and fill in your Auth0 credentials."
+        )
+    return value
+
+
+AUTH0_DOMAIN = _require_env("AUTH0_DOMAIN")
+AUTH0_CLIENT_ID = _require_env("AUTH0_CLIENT_ID")
+AUTH0_CLIENT_SECRET = _require_env("AUTH0_CLIENT_SECRET")
+
+app = Flask(__name__)
+app.config.update(
+    SECRET_KEY=_require_env("SECRET_KEY"),
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+)
 
 oauth = OAuth(app)
 auth0 = oauth.register(
@@ -26,8 +41,7 @@ auth0 = oauth.register(
 
 @app.route("/")
 def home():
-    user = session.get("user")
-    return render_template("home.html", user=user)
+    return render_template("home.html", user=session.get("user"))
 
 
 @app.route("/login")
@@ -39,7 +53,11 @@ def login():
 
 @app.route("/callback")
 def callback():
-    token = oauth.auth0.authorize_access_token()
+    try:
+        token = oauth.auth0.authorize_access_token()
+    except Exception:
+        app.logger.exception("Auth0 authorization callback failed")
+        return redirect(url_for("home"))
     session["user"] = token.get("userinfo")
     return redirect(url_for("dashboard"))
 
@@ -55,16 +73,16 @@ def dashboard():
 @app.route("/logout")
 def logout():
     session.clear()
-    return redirect(
-        f"https://{AUTH0_DOMAIN}/v2/logout?"
-        + urlencode(
-            {
-                "returnTo": url_for("home", _external=True),
-                "client_id": AUTH0_CLIENT_ID,
-            }
-        )
-    )
+    params = {
+        "returnTo": url_for("home", _external=True),
+        "client_id": AUTH0_CLIENT_ID,
+    }
+    return redirect(f"https://{AUTH0_DOMAIN}/v2/logout?{urlencode(params)}")
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=3000, debug=True)
+    app.run(
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", 3000)),
+        debug=os.getenv("FLASK_DEBUG", "0") == "1",
+    )
