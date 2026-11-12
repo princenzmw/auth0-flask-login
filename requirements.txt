@@ -1,4 +1,5 @@
 flask>=3.0
-authlib[requests]>=1.3
+authlib>=1.3
+requests>=2.31
 cryptography>=42
 python-dotenv>=1.0
